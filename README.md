@@ -76,13 +76,15 @@ pi config  # enable/disable individual extensions, skills, prompts, themes
 
 ## 🚀 Usage
 
-The extension registers a single `generate_visual` tool that the LLM can call directly. It also exposes two slash commands to reopen recently generated files.
+The extension registers a single `tff-generate_visual` tool that the LLM can call directly. It also exposes two slash commands to reopen recently generated files.
 
-### `generate_visual`
+> The tool id is namespaced with the `tff-` prefix so it can coexist with other pi packages that might ship a tool named `generate_visual`. The user-facing display label ("Generate Visual") stays readable — only the LLM-facing id is prefixed.
+
+### `tff-generate_visual`
 
 ```typescript
 // Render a technical architecture diagram
-generate_visual({
+tff-generate_visual({
   type: "architecture",
   title: "Auth System Overview",
   aesthetic: "blueprint",
@@ -95,7 +97,7 @@ generate_visual({
 });
 
 // Render a Mermaid flowchart
-generate_visual({
+tff-generate_visual({
   type: "flowchart",
   title: "Data Pipeline",
   aesthetic: "editorial",
@@ -103,7 +105,7 @@ generate_visual({
 });
 
 // Render a comparison table
-generate_visual({
+tff-generate_visual({
   type: "table",
   title: "API Endpoints",
   aesthetic: "paper",
@@ -138,7 +140,7 @@ Generated HTML files are saved to `~/.agent/diagrams/` and automatically opened 
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  LLM Request│────▶│ generate_visual  │────▶│   Browser   │
+│  LLM Request│────▶│tff-generate_visual│───▶│   Browser   │
 │  (via PI)   │     │  (defineTool)    │     │   (HTML)    │
 └─────────────┘     └────────┬─────────┘     └─────────────┘
                              │
