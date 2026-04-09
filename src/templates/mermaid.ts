@@ -87,7 +87,7 @@ function generateBody(title: string, content: MermaidContent): string {
       </div>
       <div class="mermaid-viewport">
         <div class="mermaid-canvas">
-          <pre class="mermaid">${escapeHtml(content.mermaidSyntax)}</pre>
+          <pre class="mermaid">${content.mermaidSyntax}</pre>
         </div>
       </div>
     </div>
