@@ -2,7 +2,11 @@
 	"packages": {
 		".": {
 			"release-type": "node",
-			"include-component-in-tag": false
+			"package-name": "@the-forge-flow/visual-explainer-pi",
+			"bump-minor-pre-major": true,
+			"bump-patch-for-minor-pre-major": true,
+			"draft": false,
+			"prerelease": false
 		}
 	}
 }
