@@ -9,7 +9,7 @@
 
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { defineTool, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
+import { defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { generateArchitectureTemplate } from "./templates/architecture.js";
 import { generateTableTemplate } from "./templates/data-table.js";
@@ -128,16 +128,17 @@ async function generateVisual(
 			throw new Error(`Unsupported visual type: ${params.type}`);
 	}
 
-	// Safety check: truncate if too large
-	const truncated = truncateHead(html, { maxBytes: 50000, maxLines: 2000 });
-
 	// Generate filename
 	const filename = params.filename
 		? sanitizeFilename(params.filename)
 		: generateDefaultFilename(params.title);
 
-	// Write file
-	const filePath = await writeHtmlFile(filename, truncated.content, state);
+	// Write the full HTML to disk. We intentionally do NOT run the pi
+	// truncateHead helper here — that utility clips LLM-facing tool output,
+	// not files on disk. Cutting the HTML at an arbitrary byte boundary would
+	// leave unclosed tags/scripts and silently corrupt every non-trivial
+	// diagram. See bug report: "mermaid graphs are always bugged".
+	const filePath = await writeHtmlFile(filename, html, state);
 
 	// Open in browser
 	await openInBrowser(filePath, pi);

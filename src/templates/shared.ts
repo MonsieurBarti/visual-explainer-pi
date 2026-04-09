@@ -496,118 +496,457 @@ code {
 }
 `;
 
-// Mermaid zoom/pan CSS and JS
+// Mermaid zoom/pan CSS and JS.
+//
+// This is the proven pattern from nicobailon/visual-explainer's reference
+// mermaid-flowchart.html. The earlier implementation had several subtle bugs:
+//   - mermaid source lived in <pre class="mermaid"> so the HTML parser would
+//     mangle `<br/>`, `<`, `>`, `&` before Mermaid ever saw the text
+//   - `startOnLoad: true` + a 500ms setTimeout to bind zoom controls is a
+//     race — on large diagrams the controls would never bind
+//   - the viewport had no height, so pan and fit were meaningless
+//   - new-tab export produced a blank page (bare SVG blob, no background)
+//
+// Now the source lives in a `<script type="text/plain" class="diagram-source">`
+// which the HTML parser treats as opaque data; we render explicitly via
+// `mermaid.render(id, code)` and await it before binding handlers. Adaptive
+// height is computed from the SVG's intrinsic aspect ratio. The new-tab
+// export wraps the SVG in a minimal HTML shell with the page background.
 export const MERMAID_SHELL_CSS = `
 .diagram-shell {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.diagram-shell__hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  opacity: 0.7;
 }
 
 .mermaid-wrap {
   position: relative;
-  display: flex;
-  justify-content: center;
-  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 360px;
 }
 
 .mermaid-viewport {
+  position: relative;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
   cursor: grab;
 }
 
-.mermaid-viewport:active {
+.mermaid-wrap.is-panning .mermaid-viewport {
   cursor: grabbing;
+  user-select: none;
 }
 
 .mermaid-canvas {
-  transform-origin: center center;
-  transition: transform 0.1s ease-out;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.mermaid-canvas svg {
+  display: block;
+  max-width: none;
 }
 
 .zoom-controls {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  right: 8px;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
   z-index: 10;
-}
-
-.zoom-btn {
-  width: 32px;
-  height: 32px;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 16px;
+  padding: 2px 4px;
+}
+
+.zoom-controls button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 14px;
   cursor: pointer;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.zoom-btn:hover {
-  background: var(--surface2);
-  border-color: var(--border-bright);
+.zoom-controls button:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.zoom-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.mermaid .nodeLabel {
+  font-family: var(--font-body) !important;
+}
+
+.mermaid .edgeLabel {
+  font-family: var(--font-mono) !important;
 }
 `;
 
+// Vanilla IIFE — no module scope needed. Handles multiple `.diagram-shell`
+// instances on the same page. Each instance has its own `<script
+// type="text/plain" class="diagram-source">` holding the raw mermaid source.
 export const MERMAID_SHELL_JS = `
-function initMermaidControls(wrap) {
-  const viewport = wrap.querySelector('.mermaid-viewport');
-  const canvas = wrap.querySelector('.mermaid-canvas');
-  let scale = 1;
-  let isDragging = false;
-  let startX, startY, translateX = 0, translateY = 0;
+(function initAllDiagrams() {
+  const config = {
+    fitPadding: 24,
+    minHeight: 360,
+    maxHeightPx: 960,
+    maxHeightVh: 0.84,
+    maxInitialZoom: 1.8,
+    minZoom: 0.08,
+    maxZoom: 6.5,
+    zoomStep: 0.14,
+    readabilityFloor: 0.58
+  };
 
-  function updateTransform() {
-    canvas.style.transform = \`translate(\${translateX}px, \${translateY}px) scale(\${scale})\`;
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  let activeDrag = null;
+
+  addEventListener('mousemove', (e) => activeDrag && activeDrag.onMove(e));
+  addEventListener('mouseup', () => {
+    if (activeDrag) activeDrag.onEnd();
+    activeDrag = null;
+  });
+
+  function initDiagram(shell) {
+    const wrap = shell.querySelector('.mermaid-wrap');
+    const viewport = shell.querySelector('.mermaid-viewport');
+    const canvas = shell.querySelector('.mermaid-canvas');
+    const source = shell.querySelector('.diagram-source');
+    const label = shell.querySelector('.zoom-label');
+    if (!wrap || !viewport || !canvas || !source || !label) {
+      console.error('visual-explainer: missing required elements in', shell);
+      return;
+    }
+
+    let zoom = 1;
+    let fitMode = 'contain';
+    let panX = 0;
+    let panY = 0;
+    let svgW = 0;
+    let svgH = 0;
+    let sx = 0;
+    let sy = 0;
+    let spx = 0;
+    let spy = 0;
+    let touchDist = 0;
+    let touchCx = 0;
+    let touchCy = 0;
+
+    function constrainPan() {
+      const vpW = viewport.clientWidth;
+      const vpH = viewport.clientHeight;
+      const rW = svgW * zoom;
+      const rH = svgH * zoom;
+      const pad = config.fitPadding;
+      panX = (rW + pad * 2 <= vpW) ? (vpW - rW) / 2 : clamp(panX, vpW - rW - pad, pad);
+      panY = (rH + pad * 2 <= vpH) ? (vpH - rH) / 2 : clamp(panY, vpH - rH - pad, pad);
+    }
+
+    function applyTransform() {
+      const svg = canvas.querySelector('svg');
+      if (!svg || !svgW) return;
+      constrainPan();
+      svg.style.width = (svgW * zoom) + 'px';
+      svg.style.height = (svgH * zoom) + 'px';
+      canvas.style.transform = 'translate(' + panX + 'px, ' + panY + 'px)';
+      label.textContent = Math.round(zoom * 100) + '% \u2014 ' + fitMode;
+    }
+
+    function canPan() {
+      const rW = svgW * zoom;
+      const rH = svgH * zoom;
+      return rW + config.fitPadding * 2 > viewport.clientWidth
+          || rH + config.fitPadding * 2 > viewport.clientHeight;
+    }
+
+    function computeSmartFit() {
+      const vpW = viewport.clientWidth;
+      const vpH = viewport.clientHeight;
+      const aW = Math.max(80, vpW - config.fitPadding * 2);
+      const aH = Math.max(80, vpH - config.fitPadding * 2);
+      const contain = Math.min(aW / svgW, aH / svgH);
+      let z = contain;
+      let mode = 'contain';
+      if (contain < config.readabilityFloor) {
+        const chartR = svgH / svgW;
+        const vpR = vpH / Math.max(vpW, 1);
+        if (chartR >= vpR) { z = aW / svgW; mode = 'width-priority'; }
+        else { z = aH / svgH; mode = 'height-priority'; }
+      }
+      return { zoom: clamp(z, config.minZoom, config.maxInitialZoom), mode };
+    }
+
+    function fitDiagram() {
+      if (!svgW) return;
+      const fit = computeSmartFit();
+      zoom = fit.zoom;
+      fitMode = fit.mode;
+      panX = (viewport.clientWidth - svgW * zoom) / 2;
+      panY = (viewport.clientHeight - svgH * zoom) / 2;
+      applyTransform();
+    }
+
+    function setOneToOne() {
+      zoom = clamp(1, config.minZoom, config.maxZoom);
+      fitMode = '1:1';
+      panX = (viewport.clientWidth - svgW * zoom) / 2;
+      panY = (viewport.clientHeight - svgH * zoom) / 2;
+      applyTransform();
+    }
+
+    function zoomAround(factor, cx, cy) {
+      const next = clamp(zoom * factor, config.minZoom, config.maxZoom);
+      const ratio = next / zoom;
+      panX = cx - ratio * (cx - panX);
+      panY = cy - ratio * (cy - panY);
+      zoom = next;
+      fitMode = 'custom';
+      applyTransform();
+    }
+
+    function readSvgNaturalSize(svg) {
+      let w = 0;
+      let h = 0;
+      if (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+        w = svg.viewBox.baseVal.width;
+        h = svg.viewBox.baseVal.height;
+      }
+      if (!w) {
+        w = parseFloat(svg.getAttribute('width')) || 0;
+        h = parseFloat(svg.getAttribute('height')) || 0;
+      }
+      if (!w) {
+        try { const b = svg.getBBox(); w = b.width; h = b.height; } catch {}
+      }
+      if (!w) {
+        const r = svg.getBoundingClientRect();
+        w = r.width || 1000;
+        h = r.height || 700;
+      }
+      if (!svg.getAttribute('viewBox')) {
+        svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+      }
+      return { w, h };
+    }
+
+    function setAdaptiveHeight() {
+      if (!svgW) return;
+      const usableW = Math.max(280, wrap.getBoundingClientRect().width - 2);
+      const idealH = (svgH / svgW) * usableW + config.fitPadding * 2;
+      const maxVp = Math.floor(innerHeight * config.maxHeightVh);
+      const hardMax = Math.min(config.maxHeightPx, Math.max(config.minHeight + 40, maxVp));
+      wrap.style.height = Math.round(clamp(idealH, config.minHeight, hardMax)) + 'px';
+    }
+
+    function openInNewTab() {
+      const svg = canvas.querySelector('svg');
+      if (!svg) return;
+      const clone = svg.cloneNode(true);
+      clone.style.width = '';
+      clone.style.height = '';
+      // Read the page background from the wrap's data-bg attribute (written
+      // server-side from the current palette). This guarantees the new tab
+      // matches the diagram's baked-in theme.
+      const bg = wrap.getAttribute('data-bg') || '#ffffff';
+      const html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+        + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        + '<title>Diagram</title><style>'
+        + 'body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
+        + 'background:' + bg + ';padding:40px;box-sizing:border-box}'
+        + 'svg{max-width:100%;max-height:90vh;height:auto}'
+        + '</style></head><body>' + clone.outerHTML + '</body></html>';
+      open(URL.createObjectURL(new Blob([html], { type: 'text/html' })), '_blank');
+    }
+
+    function waitForMermaid() {
+      return new Promise((resolve, reject) => {
+        if (window.mermaid && typeof window.mermaid.render === 'function') {
+          resolve(window.mermaid);
+          return;
+        }
+        const started = Date.now();
+        const timer = setInterval(() => {
+          if (window.mermaid && typeof window.mermaid.render === 'function') {
+            clearInterval(timer);
+            resolve(window.mermaid);
+          } else if (Date.now() - started > 10000) {
+            clearInterval(timer);
+            reject(new Error('Mermaid failed to load from CDN (10s timeout)'));
+          }
+        }, 50);
+      });
+    }
+
+    async function render() {
+      try {
+        const code = (source.textContent || '').trim();
+        if (!code) {
+          label.textContent = 'Error: empty source';
+          return;
+        }
+        const mermaid = await waitForMermaid();
+        const id = 'diagram-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        const { svg } = await mermaid.render(id, code);
+        canvas.innerHTML = svg;
+        const svgNode = canvas.querySelector('svg');
+        if (!svgNode) {
+          label.textContent = 'Error: no SVG';
+          return;
+        }
+        const size = readSvgNaturalSize(svgNode);
+        svgW = size.w;
+        svgH = size.h;
+        svgNode.removeAttribute('width');
+        svgNode.removeAttribute('height');
+        svgNode.style.maxWidth = 'none';
+        svgNode.style.display = 'block';
+        setAdaptiveHeight();
+        fitDiagram();
+      } catch (err) {
+        console.error('visual-explainer mermaid render failed:', err);
+        label.textContent = 'Error: ' + (err && err.message ? err.message : 'render failed');
+        canvas.innerHTML = '<pre style="padding:20px;color:#b00020;white-space:pre-wrap;font-family:monospace;font-size:12px">'
+          + String(err && err.message ? err.message : err).replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))
+          + '</pre>';
+      }
+    }
+
+    const actions = {
+      'zoom-in':     () => zoomAround(1 + config.zoomStep, viewport.clientWidth / 2, viewport.clientHeight / 2),
+      'zoom-out':    () => zoomAround(1 / (1 + config.zoomStep), viewport.clientWidth / 2, viewport.clientHeight / 2),
+      'zoom-fit':    fitDiagram,
+      'zoom-one':    setOneToOne,
+      'zoom-expand': openInNewTab
+    };
+    Object.keys(actions).forEach((action) => {
+      const btn = wrap.querySelector('[data-action="' + action + '"]');
+      if (btn) btn.addEventListener('click', actions[action]);
+    });
+
+    viewport.addEventListener('dblclick', fitDiagram);
+
+    viewport.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const rect = viewport.getBoundingClientRect();
+        const factor = e.deltaY < 0 ? 1 + config.zoomStep : 1 / (1 + config.zoomStep);
+        zoomAround(factor, e.clientX - rect.left, e.clientY - rect.top);
+        return;
+      }
+      if (canPan()) {
+        e.preventDefault();
+        panX -= e.deltaX;
+        panY -= e.deltaY;
+        applyTransform();
+      }
+    }, { passive: false });
+
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.zoom-controls') || !canPan()) return;
+      wrap.classList.add('is-panning');
+      sx = e.clientX;
+      sy = e.clientY;
+      spx = panX;
+      spy = panY;
+      e.preventDefault();
+      activeDrag = {
+        onMove: (ev) => {
+          panX = spx + (ev.clientX - sx);
+          panY = spy + (ev.clientY - sy);
+          applyTransform();
+        },
+        onEnd: () => { wrap.classList.remove('is-panning'); }
+      };
+    });
+
+    viewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        sx = e.touches[0].clientX;
+        sy = e.touches[0].clientY;
+        spx = panX;
+        spy = panY;
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        touchDist = Math.sqrt(dx * dx + dy * dy);
+        const r = viewport.getBoundingClientRect();
+        touchCx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+        touchCy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1 && canPan()) {
+        if (touchDist > 0) {
+          sx = e.touches[0].clientX;
+          sy = e.touches[0].clientY;
+          spx = panX;
+          spy = panY;
+          touchDist = 0;
+        }
+        e.preventDefault();
+        panX = spx + (e.touches[0].clientX - sx);
+        panY = spy + (e.touches[0].clientY - sy);
+        applyTransform();
+      } else if (e.touches.length === 2 && touchDist > 0) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        zoomAround(d / touchDist, touchCx, touchCy);
+        touchDist = d;
+      }
+    }, { passive: false });
+
+    new ResizeObserver(() => {
+      if (svgW) { setAdaptiveHeight(); fitDiagram(); }
+    }).observe(wrap);
+
+    render();
   }
 
-  wrap.querySelector('[data-zoom="in"]').onclick = () => { scale *= 1.2; updateTransform(); };
-  wrap.querySelector('[data-zoom="out"]').onclick = () => { scale /= 1.2; updateTransform(); };
-  wrap.querySelector('[data-zoom="reset"]').onclick = () => { scale = 1; translateX = 0; translateY = 0; updateTransform(); };
-  wrap.querySelector('[data-zoom="expand"]').onclick = () => openMermaidInNewTab(wrap);
+  function bootstrap() {
+    document.querySelectorAll('.diagram-shell').forEach(initDiagram);
+  }
 
-  viewport.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    startX = e.clientX - translateX;
-    startY = e.clientY - translateY;
-    viewport.style.cursor = 'grabbing';
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    translateX = e.clientX - startX;
-    translateY = e.clientY - startY;
-    updateTransform();
-  });
-
-  window.addEventListener('mouseup', () => {
-    isDragging = false;
-    viewport.style.cursor = 'grab';
-  });
-
-  viewport.addEventListener('wheel', (e) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      scale *= e.deltaY > 0 ? 0.9 : 1.1;
-      updateTransform();
-    }
-  }, { passive: false });
-}
-
-function openMermaidInNewTab(wrap) {
-  const svg = wrap.querySelector('svg');
-  if (!svg) return;
-  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-}
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
+})();
 `;
 
 // Helper to generate CSS variables from palette
