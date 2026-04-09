@@ -178,9 +178,13 @@ export default function visualExplainerExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// Register generate_visual tool
+	// Register tff-generate_visual tool
 	const generateVisualTool = defineTool({
-		name: "generate_visual",
+		// Namespaced with the tff- prefix so it can coexist with other pi
+		// packages that might ship a tool named "generate_visual". The
+		// user-facing display label ("Generate Visual") stays readable;
+		// only the LLM-facing tool id carries the prefix.
+		name: "tff-generate_visual",
 		label: "Generate Visual",
 		description:
 			"Generate beautiful, self-contained HTML pages for diagrams, architecture overviews, diff reviews, data tables, and visual explanations. Opens result in browser. Based on nicobailon/visual-explainer design principles.",

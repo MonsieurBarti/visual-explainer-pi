@@ -51,11 +51,11 @@ visual-explainer-pi/
 - **CI/CD:** GitHub Actions
 - **Release:** release-please
 
-## Core Tool: `generate_visual`
+## Core Tool: `tff-generate_visual`
 
 ### Interface
 ```typescript
-name: "generate_visual"
+name: "tff-generate_visual"
 label: "Generate Visual"
 description: "Generate beautiful, self-contained HTML pages for diagrams, architecture overviews, diff reviews, data tables, and visual explanations."
 
