@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.1...visual-explainer-pi-v0.2.2) (2026-04-11)
+
+
+### Bug Fixes
+
+* **mermaid:** fix multiple rendering bugs that broke every diagram ([#7](https://github.com/MonsieurBarti/visual-explainer-pi/issues/7)) ([6603821](https://github.com/MonsieurBarti/visual-explainer-pi/commit/660382101efccb15b0c0573d8ef42cb54b8db94c))
+
 ## [0.2.1](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.0...visual-explainer-pi-v0.2.1) (2026-04-09)
 
 
