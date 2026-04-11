@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.2...visual-explainer-pi-v0.2.3) (2026-04-11)
+
+
+### Features
+
+* add update notification on session start ([#9](https://github.com/MonsieurBarti/visual-explainer-pi/issues/9)) ([b2e4005](https://github.com/MonsieurBarti/visual-explainer-pi/commit/b2e40053947403715240b1d1828c4b203d32c905))
+
 ## [0.2.2](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.1...visual-explainer-pi-v0.2.2) (2026-04-11)
 
 
