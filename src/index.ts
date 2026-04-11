@@ -15,6 +15,7 @@ import { generateArchitectureTemplate } from "./templates/architecture.js";
 import { generateTableTemplate } from "./templates/data-table.js";
 import { generateMermaidTemplate } from "./templates/mermaid.js";
 import type { ExtensionState, GenerateResult, GenerateVisualParams } from "./types.js";
+import { checkForUpdates } from "./update-check.js";
 import { openInBrowser } from "./utils/browser-open.js";
 import { createInitialState, writeHtmlFile } from "./utils/file-writer.js";
 import { generateDefaultFilename, sanitizeFilename, validateParams } from "./utils/validators.js";
@@ -174,6 +175,15 @@ function escapeHtml(str: string): string {
 export default function visualExplainerExtension(pi: ExtensionAPI) {
 	// Initialize on session start
 	pi.on("session_start", async (_event, ctx) => {
+		// Check for extension updates
+		const updateInfo = await checkForUpdates(pi);
+		if (updateInfo?.updateAvailable) {
+			ctx.ui.notify(
+				`📦 Update available: ${updateInfo.latestVersion} (you have ${updateInfo.currentVersion}). Run: pi install npm:@the-forge-flow/visual-explainer-pi`,
+				"info",
+			);
+		}
+
 		if (ctx.hasUI) {
 			ctx.ui.notify("Visual explainer ready", "info");
 		}
