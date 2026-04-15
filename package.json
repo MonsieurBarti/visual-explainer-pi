@@ -1,6 +1,6 @@
 {
 	"name": "@the-forge-flow/visual-explainer-pi",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"description": "PI extension for generating beautiful HTML visualizations of diagrams, architecture, and data",
 	"type": "module",
 	"main": "dist/index.js",

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.3...visual-explainer-pi-v0.2.4) (2026-04-15)
+
+
+### Features
+
+* make update checks non-blocking ([#11](https://github.com/MonsieurBarti/visual-explainer-pi/issues/11)) ([266a544](https://github.com/MonsieurBarti/visual-explainer-pi/commit/266a544a3f09423e55743c3e934fbbcce7e53cb4))
+
 ## [0.2.3](https://github.com/MonsieurBarti/visual-explainer-pi/compare/visual-explainer-pi-v0.2.2...visual-explainer-pi-v0.2.3) (2026-04-11)
 
 
