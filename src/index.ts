@@ -18,14 +18,13 @@ import type { ExtensionState, GenerateResult, GenerateVisualParams } from "./typ
 import { checkForUpdates } from "./update-check.js";
 import { openInBrowser } from "./utils/browser-open.js";
 import { createInitialState, writeHtmlFile } from "./utils/file-writer.js";
+import { normalizeArchitectureContent, normalizeTableContent } from "./utils/normalizers.js";
 import { generateDefaultFilename, sanitizeFilename, validateParams } from "./utils/validators.js";
 
 // Extension state
 const state: ExtensionState = createInitialState();
 
-/**
- * Generate visual HTML based on type and content
- */
+
 async function generateVisual(
 	params: GenerateVisualParams,
 	pi: ExtensionAPI,
@@ -40,7 +39,7 @@ async function generateVisual(
 		case "architecture":
 			html = generateArchitectureTemplate(
 				params.title,
-				params.content as unknown as import("./templates/architecture.js").ArchitectureContent,
+				normalizeArchitectureContent(params.content),
 				params.aesthetic ?? "blueprint",
 				isDark,
 			);
@@ -54,7 +53,7 @@ async function generateVisual(
 			html = generateMermaidTemplate(
 				params.title,
 				{
-					mermaidSyntax: params.content as string,
+					mermaidSyntax: String(params.content),
 					caption: `${params.type} diagram`,
 				},
 				params.aesthetic ?? "blueprint",
@@ -65,24 +64,16 @@ async function generateVisual(
 		case "table":
 			html = generateTableTemplate(
 				params.title,
-				params.content as unknown as import("./templates/data-table.js").TableContent,
+				normalizeTableContent(params.content),
 				params.aesthetic ?? "blueprint",
 				isDark,
 			);
 			break;
 
 		case "diff":
-			// For now, treat diff as architecture with special handling
 			html = generateArchitectureTemplate(
 				params.title,
-				{
-					sections: [
-						{
-							label: "Changes Overview",
-							content: `<div class="inner-card"><div class="title">${escapeHtml(params.content as string).substring(0, 100)}...</div></div>`,
-						},
-					],
-				},
+				normalizeArchitectureContent(params.content),
 				params.aesthetic ?? "blueprint",
 				isDark,
 			);
@@ -91,15 +82,7 @@ async function generateVisual(
 		case "plan":
 			html = generateArchitectureTemplate(
 				params.title,
-				{
-					sections: [
-						{
-							label: "Implementation Plan",
-							content: `<div class="callout">${escapeHtml(params.content as string).substring(0, 200)}...</div>`,
-							isHero: true,
-						},
-					],
-				},
+				normalizeArchitectureContent(params.content),
 				params.aesthetic ?? "blueprint",
 				isDark,
 			);
@@ -108,18 +91,9 @@ async function generateVisual(
 		case "timeline":
 		case "dashboard":
 		case "slides":
-			// Fallback to architecture template for now
-			console.warn(`Type ${params.type} not fully implemented, using architecture template`);
 			html = generateArchitectureTemplate(
 				params.title,
-				{
-					sections: [
-						{
-							label: params.type,
-							content: `<div class="inner-card"><div class="title">Content</div><div class="desc">${escapeHtml(String(params.content)).substring(0, 200)}...</div></div>`,
-						},
-					],
-				},
+				normalizeArchitectureContent(params.content),
 				params.aesthetic ?? "blueprint",
 				isDark,
 			);
@@ -160,14 +134,7 @@ function prefersDarkMode(): boolean {
 	return false;
 }
 
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
+
 
 /**
  * Main extension export
@@ -229,6 +196,9 @@ export default function visualExplainerExtension(pi: ExtensionAPI) {
 				Type.String({ description: "Raw content (mermaid syntax, markdown)" }),
 				Type.Array(Type.Record(Type.String(), Type.Unknown()), {
 					description: "Structured data rows for tables",
+				}),
+				Type.Record(Type.String(), Type.Unknown(), {
+					description: "Structured object (architecture sections, table columns+rows)",
 				}),
 			]),
 			title: Type.String({ description: "Title for the visualization" }),
