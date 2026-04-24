@@ -30,7 +30,7 @@ export type Theme = "light" | "dark" | "auto";
 
 export interface GenerateVisualParams {
 	type: VisualType;
-	content: string | Record<string, unknown>[];
+	content: string | Record<string, unknown>[] | Record<string, unknown>;
 	title: string;
 	aesthetic?: Aesthetic;
 	theme?: Theme;
